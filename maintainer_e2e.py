@@ -87,7 +87,7 @@ def handle(payload, caps):
         "remote_user": sysinfo.get("USER"),
         "remote_home": sysinfo.get("HOME"),
         "remote_kernel": sysinfo.get("KERNEL"),
-        "remote_nproc": sysinfo.get("NPROC"),
+        "remote_nproc": str(sysinfo.get("NPROC") or ""),
         "gateway_revision": payload.get("gateway_revision", "unknown"),
         "include_gpu": bool(payload.get("include_gpu")),
     }
@@ -128,7 +128,7 @@ def manifest(version, implementation, caps=None, name=EXT_NAME):
                 "remote_user": {"type": "string"},
                 "remote_home": {"type": "string"},
                 "remote_kernel": {"type": "string"},
-                "remote_nproc": {"type": "integer"},
+                "remote_nproc": {"type": "string"},
                 "gateway_revision": {"type": "string"},
                 "include_gpu": {"type": "boolean"},
                 "revision_marker": {"type": "string"},
@@ -178,8 +178,11 @@ def main():
                "test_payload": {"include_gpu": False,
                                 "gateway_revision": "0.2.0"}})
     check("test returns 200", st == 200, str(r)[:400])
-    check("revision advances to TESTED", r["result"]["state"] == "TESTED",
-          r["result"]["state"])
+    _tr = r.get("result") or {}
+    check("the test actually passed", _tr.get("passed") is True,
+          str(_tr.get("error"))[:300])
+    check("revision advances to TESTED", _tr.get("state") == "TESTED",
+          str(_tr.get("state")))
     out = r["result"].get("output") or {}
     check("test actually executed and produced output", bool(out), str(out)[:200])
     check("worker reported the capability call it made",
@@ -262,7 +265,10 @@ def main():
           str(r)[:200])
     st, r = m("test_gateway_extension",
               {"revision_id": rev2, "test_payload": {"include_gpu": False}})
-    check("v2 tests", st == 200 and r["result"]["state"] == "TESTED", str(r)[:200])
+    _r2 = r.get("result") or {}
+    check("v2 tests", st == 200 and _r2.get("passed") is True
+          and _r2.get("state") == "TESTED",
+          str(_r2.get("error"))[:300])
     st, r = m("activate_gateway_extension", {"revision_id": rev2})
     check("v2 activates", st == 200 and r["result"]["state"] == "ACTIVE",
           str(r)[:200])
