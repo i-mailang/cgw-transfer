@@ -183,20 +183,23 @@ def main():
           str(_tr.get("error"))[:300])
     check("revision advances to TESTED", _tr.get("state") == "TESTED",
           str(_tr.get("state")))
-    out = r["result"].get("output") or {}
+    _env = _tr.get("result") or {}
+    out = _env.get("output") or {}
     check("test actually executed and produced output", bool(out), str(out)[:200])
     check("worker reported the capability call it made",
           any(c.get("cap") == "ssh.status"
-              for c in (r["result"].get("cap_calls") or [])),
-          str(r["result"].get("cap_calls"))[:200])
+              for c in (_env.get("cap_calls") or [])),
+          str(_env.get("cap_calls"))[:200])
     check("remote hostname came back from the real HPC",
-          bool(out.get("remote_hostname")), str(out)[:200])
+          out.get("remote_hostname") == "gpulinux02",
+          str(out)[:200])
 
     section("4. ACTIVE - atomic activation and registry publication")
     st, r = m("activate_gateway_extension", {"revision_id": rev1})
     check("activate returns 200", st == 200, str(r)[:300])
-    check("revision is ACTIVE", r["result"]["state"] == "ACTIVE",
-          r["result"]["state"])
+    _ar = r.get("result") or {}
+    check("revision is the active one", _ar.get("active_revision") == rev1,
+          str(_ar)[:200])
 
     st, r = call("tools", None, JOB, method="GET")
     names = [t["name"] for t in r["result"]["tools"]]
@@ -270,7 +273,8 @@ def main():
           and _r2.get("state") == "TESTED",
           str(_r2.get("error"))[:300])
     st, r = m("activate_gateway_extension", {"revision_id": rev2})
-    check("v2 activates", st == 200 and r["result"]["state"] == "ACTIVE",
+    check("v2 activates",
+          st == 200 and (r.get("result") or {}).get("active_revision") == rev2,
           str(r)[:200])
     st, r = call(EXT_NAME, {"include_gpu": False}, JOB)
     check("the registry now serves v2",
@@ -286,9 +290,10 @@ def main():
     section("9. ROLLBACK to the previous known-good revision")
     st, r = m("rollback_gateway_extension", {"name": EXT_NAME})
     check("rollback returns 200", st == 200, str(r)[:400])
+    _rb = r.get("result") or {}
     check("rollback reports the revision it moved to",
-          (r["result"] or {}).get("revision_id") == rev1,
-          str(r.get("result"))[:300])
+          _rb.get("active_revision") == rev1,
+          str(_rb)[:300])
     st, r = call(EXT_NAME, {"include_gpu": False}, JOB)
     check("v1 behaviour is restored (no revision_marker)",
           st == 200 and "revision_marker" not in (r.get("result") or {}),
@@ -428,7 +433,8 @@ def main():
     # Re-activate v1 and confirm the registry rebuilds correctly.
     st, r = m("activate_gateway_extension", {"revision_id": rev1})
     check("v1 can be re-activated after being disabled",
-          st == 200 and r["result"]["state"] == "ACTIVE", str(r)[:200])
+          st == 200 and (r.get("result") or {}).get("active_revision") == rev1,
+          str(r)[:200])
     st, r = call("tools", None, JOB, method="GET")
     names = [t["name"] for t in r["result"]["tools"]]
     check("re-activated extension is back in the registry", EXT_NAME in names)
