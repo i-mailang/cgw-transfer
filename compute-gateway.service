@@ -1,0 +1,61 @@
+[Unit]
+Description=Compute Gateway - structured HPC job control plane
+Documentation=file:/opt/services/apps/compute-gateway/IMPLEMENTATION_REPORT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cgw
+Group=cgw
+WorkingDirectory=/opt/services/apps/compute-gateway
+Environment=PYTHONPATH=/opt/services/apps/compute-gateway/vendor
+Environment=CGW_DATA_DIR=/opt/services/data/compute-gateway
+Environment=CGW_LOG_DIR=/opt/services/logs/compute-gateway
+Environment=CGW_SECRETS=/opt/services/data/compute-gateway/secrets.env
+Environment=CGW_HOST=127.0.0.1
+Environment=CGW_PORT=8787
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -u /opt/services/apps/compute-gateway/gateway.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Loopback only. No public exposure, no TLS, no reverse proxy.
+# Caddy is deliberately NOT configured to forward to this port.
+# The HPC private key lives outside the repo and is readable only by cgw.
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Resource caps, in line with the other services on this host.
+MemoryHigh=400M
+MemoryMax=800M
+CPUWeight=50
+IOWeight=20
+Nice=10
+
+# Hardening. The service needs: read the app tree, read/write its own data
+# dir, read the SSH key, and open outbound SSH to the HPC. It must not be
+# able to write anywhere else or to escalate.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/services/data/compute-gateway /opt/services/logs/compute-gateway
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+StandardOutput=append:/opt/services/logs/compute-gateway/compute-gateway.log
+StandardError=append:/opt/services/logs/compute-gateway/compute-gateway.log
+
+[Install]
+WantedBy=multi-user.target
