@@ -109,7 +109,22 @@ EXT_SRC_V2 = EXT_SRC_V1.replace(
 BAD_SRC = "def handle(payload, caps):\n    return {'x': eval('1+1')}\n"
 
 
-def manifest(version, implementation, caps=None, name=EXT_NAME):
+def manifest(version, implementation, caps=None, name=EXT_NAME,
+             extra_output=None):
+    props = {
+        "remote_hostname": {"type": "string"},
+        "remote_user": {"type": "string"},
+        "remote_home": {"type": "string"},
+        "remote_kernel": {"type": "string"},
+        "remote_nproc": {"type": "string"},
+        "gateway_revision": {"type": "string"},
+        "include_gpu": {"type": "boolean"},
+        "revision_marker": {"type": "string"},
+        "gpu_count": {"type": "integer"},
+        "gpu_present": {"type": "boolean"},
+    }
+    if extra_output:
+        props.update(extra_output)
     return {
         "name": name,
         "version": version,
@@ -121,21 +136,7 @@ def manifest(version, implementation, caps=None, name=EXT_NAME):
                 "gateway_revision": {"type": "string"},
             },
         },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "remote_hostname": {"type": "string"},
-                "remote_user": {"type": "string"},
-                "remote_home": {"type": "string"},
-                "remote_kernel": {"type": "string"},
-                "remote_nproc": {"type": "string"},
-                "gateway_revision": {"type": "string"},
-                "include_gpu": {"type": "boolean"},
-                "revision_marker": {"type": "string"},
-                "gpu_count": {"type": "integer"},
-                "gpu_present": {"type": "boolean"},
-            },
-        },
+        "output_schema": {"type": "object", "properties": props},
         "implementation": implementation,
         "capabilities": caps if caps is not None else ["ssh.status"],
         "timeout": 120,
@@ -374,8 +375,11 @@ def main():
         "            'import_os_blocked': True}\n"
     )
     st, r = m("upsert_gateway_extension",
-              {"manifest": manifest("1.0.0", probe_src, caps=[],
-                                    name="proc_isolation_probe")})
+              {"manifest": manifest(
+                  "1.0.0", probe_src, caps=[], name="proc_isolation_probe",
+                  extra_output={"sandbox_read": {"type": "string"},
+                                "caps_granted": {"type": "array"},
+                                "import_os_blocked": {"type": "boolean"}})})
     probe_rev = r["result"]["revision_id"]
     m("validate_gateway_extension", {"revision_id": probe_rev})
     st, r = m("test_gateway_extension", {"revision_id": probe_rev,
@@ -384,10 +388,12 @@ def main():
     gw_pid = subprocess.run(["systemctl", "show", "compute-gateway.service",
                              "-p", "MainPID", "--value"],
                             capture_output=True, text=True).stdout.strip()
+    _pr = r.get("result") or {}
     check("extension can use its private sandbox",
           probe_out.get("sandbox_read") == "hello",
-          "output=%s error=%s" % (str(probe_out)[:160],
-                                  str((r.get("result") or {}).get("error"))[:240]))
+          "passed=%s state=%s output=%s error=%s stderr=%s" % (
+              _pr.get("passed"), _pr.get("state"), str(probe_out)[:120],
+              str(_pr.get("error"))[:200], str(_pr.get("worker_stderr"))[:200]))
     check("worker reports exactly the capabilities it was granted",
           probe_out.get("caps_granted") == [], str(probe_out.get("caps_granted")))
 
@@ -508,8 +514,8 @@ def main():
     st, r = call("tools", None, MAINT, method="GET")
     leftovers = [t["name"] for t in r["result"]["tools"]
                  if t.get("plane") == "extension"]
-    check("no probe extension is left in the registry", leftovers == [],
-          str(leftovers))
+    check("only the intended extension remains active after cleanup",
+          leftovers == [EXT_NAME], str(leftovers))
 
     # ----------------------------------------------------------------------
     section("SUMMARY")
