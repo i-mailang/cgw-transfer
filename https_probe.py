@@ -9,7 +9,7 @@ import json
 import ssl
 import urllib.request
 
-BASE = "https://localhost:8443"
+BASE = "https://127.0.0.1:8443"
 with open("/opt/services/data/site-mcp/mcp_token") as fh:
     TOK = fh.read().strip()
 
