@@ -10,7 +10,7 @@ import time
 
 CFG = """{
 	admin off
-	auto_https off
+	auto_https disable_redirects
 	storage file_system /tmp/ct/storage
 }
 
