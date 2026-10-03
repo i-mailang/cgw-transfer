@@ -1,0 +1,57 @@
+[Unit]
+Description=Compute Gateway - Site MCP adapter (dynamic tool discovery over MCP)
+Documentation=file:/opt/services/apps/site-mcp/README.md
+After=network-online.target compute-gateway.service
+Wants=network-online.target
+# The adapter reads the Gateway manifest at startup, so it must start after it.
+Requires=compute-gateway.service
+
+[Service]
+Type=simple
+User=smcp
+Group=smcp
+WorkingDirectory=/opt/services/apps/site-mcp
+Environment=PYTHONPATH=/opt/services/apps/site-mcp/vendor
+Environment=PYTHONUNBUFFERED=1
+Environment=MCP_BIND_HOST=127.0.0.1
+Environment=MCP_BIND_PORT=8790
+Environment=GATEWAY_BASE=http://127.0.0.1:8787
+Environment=MCP_SECRETS=/opt/services/data/compute-gateway/secrets.env
+Environment=MCP_EXPOSE_MAINTAINER=1
+EnvironmentFile=/opt/services/data/site-mcp/mcp.env
+ExecStart=/usr/bin/python3 -u /opt/services/apps/site-mcp/server.py
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+TimeoutStartSec=60
+TimeoutStopSec=20
+
+MemoryHigh=200M
+MemoryMax=400M
+CPUWeight=50
+IOWeight=20
+Nice=10
+
+# Same hardening posture as the Gateway. ProtectSystem=full (not strict):
+# on Ubuntu 26.04 strict also mounts /opt read-only, which would block reading
+# the Gateway secrets file the adapter needs.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+StandardOutput=append:/opt/services/logs/site-mcp.log
+StandardError=append:/opt/services/logs/site-mcp.log
+
+[Install]
+WantedBy=multi-user.target
