@@ -42,7 +42,10 @@ Nice=10
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+# ProtectHome=true is deliberately NOT set: the service's own data directory
+# lives under /opt/services/data, and ProtectHome treats the service's
+# home-dir as off-limits, which blocked reading secrets.env.
+ProtectHome=false
 ReadWritePaths=/opt/services/data/compute-gateway /opt/services/logs/compute-gateway
 ProtectKernelTunables=true
 ProtectKernelModules=true
