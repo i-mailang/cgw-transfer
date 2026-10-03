@@ -1,0 +1,152 @@
+{
+  "contract_version": "1.0.0",
+  "contract_id": "site_gateway_transport_v1",
+  "gateway_version": "0.2.0",
+  "base_url": "https://compute-gateway.mailang.chatgpt.site",
+  "api_prefix": "/v1",
+  "transport": {
+    "protocol": "HTTP/1.1",
+    "content_type": "application/json; charset=utf-8",
+    "accept": "application/json",
+    "tls": "required (HTTPS only)"
+  },
+  "authentication": {
+    "scheme": "dual-header",
+    "planes": {
+      "operational": {
+        "header": "Authorization",
+        "format": "Bearer <GATEWAY_JOB_TOKEN>",
+        "description": "Job credential. Grants access to operational core tools and ACTIVE dynamic extensions."
+      },
+      "maintainer": {
+        "header": "X-Maintenance-Token",
+        "format": "<GATEWAY_MAINTAINANCE_TOKEN>",
+        "description": "Maintenance credential. Grants access to all operational tools PLUS maintainer-plane lifecycle tools and registry queries."
+      }
+    },
+    "notes": [
+      "Both headers are checked; X-Maintenance-Token takes precedence if both present.",
+      "Authorization: Bearer <maintenance_token> also works (backward compat).",
+      "Credentials are compared with constant-time comparison.",
+      "No credential is ever returned in any response body, error envelope, or log."
+    ]
+  },
+  "routes": {
+    "GET /": {
+      "description": "Service info (unauthenticated)",
+      "response": {
+        "service": "compute-gateway",
+        "version": "0.2.0",
+        "health": "/v1/health",
+        "tools": "/v1/tools"
+      }
+    },
+    "GET /v1/tools": {
+      "description": "List available tools (filtered by caller's privilege plane)",
+      "auth": "required (any valid credential)",
+      "response_structure": {
+        "plane": "operational | maintainer",
+        "tools": [
+          {
+            "name": "string (tool name)",
+            "summary": "string (human description)",
+            "endpoint": "/v1/<tool_name>",
+            "method": "POST",
+            "plane": "operational | maintainer | extension",
+            "timeout_s": "number",
+            "parameters": {
+              "type": "object",
+              "properties": { "<param_name>": { "type": "string|boolean|integer|object|array", "description": "..." } },
+              "required": ["<param_name>"]
+            }
+          }
+        ]
+      },
+      "visibility_semantics": {
+        "operational_core": "Always visible to operational and maintainer planes.",
+        "maintainer_core": "Visible only to maintainer plane. Hidden from operational callers.",
+        "active_extensions": "Visible only to maintainer plane. Hidden from operational callers.",
+        "non_active_revisions": "DRAFT, VALIDATED, TESTED, DISABLED revisions are NEVER visible. Only ACTIVE revisions appear as callable tools."
+      }
+    },
+    "POST /v1/<tool_name>": {
+      "description": "Invoke a tool by name",
+      "auth": "required (credential matching the tool's plane)",
+      "request_body": "JSON object matching the tool's input schema",
+      "success_envelope": {
+        "ok": true,
+        "result": {}
+      },
+      "error_envelope": {
+        "ok": false,
+        "error": {
+          "code": "string (machine-readable error code)",
+          "message": "string (human-readable description)",
+          "details": {}
+        }
+      }
+    }
+  },
+  "tool_categories": {
+    "operational_core": [
+      "health",
+      "system_status",
+      "gpu_status",
+      "submit_job",
+      "job_status",
+      "job_logs",
+      "cancel_job",
+      "list_jobs",
+      "list_artifacts",
+      "get_artifact"
+    ],
+    "maintainer_core": [
+      "list_gateway_extensions",
+      "get_gateway_extension",
+      "validate_gateway_extension",
+      "upsert_gateway_extension",
+      "test_gateway_extension",
+      "activate_gateway_extension",
+      "disable_gateway_extension",
+      "rollback_gateway_extension",
+      "get_gateway_maintenance_status"
+    ],
+    "dynamic_extensions": {
+      "description": "Tools created via the extension lifecycle. Only ACTIVE revisions are callable.",
+      "invocation_auth": "job_token (same as operational core)",
+      "lifecycle_auth": "maintainer_token (upsert/validate/test/activate/disable/rollback)"
+    }
+  },
+  "extension_lifecycle": {
+    "states": ["DRAFT", "VALIDATED", "TESTED", "ACTIVE", "DISABLED"],
+    "transitions": {
+      "upsert": "Creates or returns a revision (DRAFT if new, existing if source unchanged)",
+      "validate": "DRAFT -> VALIDATED (static analysis + capability check)",
+      "test": "VALIDATED -> TESTED (isolated worker execution)",
+      "activate": "TESTED|DISABLED -> ACTIVE (published to dynamic registry)",
+      "disable": "ACTIVE -> DISABLED (removed from registry, revision preserved)",
+      "rollback": "ACTIVE -> previous known-good revision becomes ACTIVE"
+    },
+    "visibility": "Only ACTIVE revisions appear in GET /v1/tools. DRAFT/VALIDATED/TESTED/DISABLED are never callable."
+  },
+  "error_codes": {
+    "UNAUTHORIZED": { "http_status": 401, "description": "Missing or invalid credentials, or insufficient privilege for the requested tool" },
+    "NOT_FOUND": { "http_status": 404, "description": "Unknown tool name or no route for the request" },
+    "BAD_REQUEST": { "http_status": 400, "description": "Malformed JSON body, missing required parameters, or parameter type mismatch" },
+    "INTERNAL_ERROR": { "http_status": 500, "description": "Unhandled server error" }
+  },
+  "timeouts": {
+    "default_tool_timeout_s": 120,
+    "submit_job_timeout_s": 240,
+    "health_timeout_s": 60,
+    "extension_test_timeout_s": 660,
+    "gateway_http_timeout_s": 700,
+    "hpc_ssh_timeout_s": 30
+  },
+  "security": {
+    "credential_handling": "Credentials are never returned in responses, error envelopes, or logs. The Gateway uses constant-time comparison.",
+    "audit": "All tool invocations are audited with tool name, plane, params (redacted), status, duration, and client identifier.",
+    "rate_limiting": "Not implemented at Gateway level. Caddy layer should apply rate limiting if needed.",
+    "tls": "HTTPS only. Gateway binds 127.0.0.1:8787; Caddy is the sole public ingress."
+  }
+}
