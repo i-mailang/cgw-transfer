@@ -31,7 +31,11 @@ def post(path, payload, token=None):
         with urllib.request.urlopen(req, timeout=700, context=CTX) as resp:
             return resp.status, json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read().decode() or "{}")
+        raw = exc.read().decode("utf-8", "replace")
+        try:
+            return exc.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return exc.code, {"raw": raw[:300]}
 
 
 def get(path):
@@ -39,7 +43,7 @@ def get(path):
         with urllib.request.urlopen(BASE + path, timeout=15, context=CTX) as resp:
             return resp.status, json.loads(resp.read().decode())
     except urllib.error.HTTPError as exc:
-        return exc.code, {}
+        return exc.code, {"raw": exc.read().decode("utf-8", "replace")[:200]}
 
 
 print("=== TLS: is the connection actually HTTPS? ===")
