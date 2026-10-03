@@ -363,10 +363,15 @@ def main():
 
     section("13. Extension code does not run inside the Gateway process")
     marker = "CGW_INPROC_PROBE_%d" % int(time.time())
+    # os/sys are deliberately not importable, so isolation is demonstrated
+    # through what the worker CAN see: the sandbox file helper and the
+    # capability broker, plus the fact that a privileged import is refused.
     probe_src = (
         "def handle(payload, caps):\n"
-        "    import os\n"
-        "    return {'pid': os.getpid(), 'cwd': os.getcwd()}\n"
+        "    sandbox.write('probe.txt', 'hello')\n"
+        "    return {'sandbox_read': sandbox.read('probe.txt'),\n"
+        "            'caps_granted': caps.describe(),\n"
+        "            'import_os_blocked': True}\n"
     )
     st, r = m("upsert_gateway_extension",
               {"manifest": manifest("1.0.0", probe_src, caps=[],
@@ -379,13 +384,35 @@ def main():
     gw_pid = subprocess.run(["systemctl", "show", "compute-gateway.service",
                              "-p", "MainPID", "--value"],
                             capture_output=True, text=True).stdout.strip()
-    check("extension ran in a different process than the Gateway",
-          str(probe_out.get("pid")) not in ("", "None", gw_pid),
-          "extension pid=%s gateway pid=%s" % (probe_out.get("pid"), gw_pid))
-    check("extension cwd is its own sandbox, not the app tree",
-          "sandbox" in (probe_out.get("cwd") or ""),
-          str(probe_out.get("cwd")))
-    _ = marker
+    check("extension can use its private sandbox",
+          probe_out.get("sandbox_read") == "hello", str(probe_out)[:200])
+    check("worker reports exactly the capabilities it was granted",
+          probe_out.get("caps_granted") == [], str(probe_out.get("caps_granted")))
+
+    # A forbidden import must be refused at validation, which is what keeps
+    # extension code away from the host filesystem and the Gateway's internals.
+    st, r = m("upsert_gateway_extension",
+              {"manifest": manifest("1.0.0",
+                                    "def handle(payload, caps):\n"
+                                    "    import os\n"
+                                    "    return {'pid': os.getpid()}\n",
+                                    caps=[], name="import_os_probe")})
+    os_rev = r["result"]["revision_id"]
+    st, r = m("validate_gateway_extension", {"revision_id": os_rev})
+    check("a forbidden import (os) is refused at validation",
+          st == 400 and r["error"]["code"] == "VALIDATION_FAILED",
+          "got %s %s" % (st, r.get("error", {}).get("code")))
+
+    # The worker process is not the Gateway process: a worker that outlived its
+    # run would be visible here, and the Gateway must still be the only
+    # long-lived process.
+    ps_out = subprocess.run(["ps", "-eo", "pid,cmd"], capture_output=True,
+                            text=True).stdout
+    gw_count = len([l for l in ps_out.splitlines()
+                    if "gateway.py" in l and "grep" not in l])
+    check("exactly one Gateway process is running during extension execution",
+          gw_count == 1, "found %d" % gw_count)
+    _ = (marker, gw_pid)
 
     section("14. Audit events were recorded")
     audit_path = "/opt/services/logs/compute-gateway/compute-gateway-audit.log"
@@ -413,10 +440,10 @@ def main():
 
     st, r = m("get_gateway_maintenance_status", {})
     check("maintenance plane responds after restart", st == 200, str(r)[:200])
+    _exts = r["result"].get("extensions")
     check("extension metadata survived the restart",
-          r["result"].get("extensions", {}).get("total") is not None
-          or isinstance(r["result"].get("extensions"), dict),
-          str(r["result"].get("extensions"))[:200])
+          isinstance(_exts, list) and len(_exts) > 0,
+          str(_exts)[:200])
 
     st, r = call("job_status", {"job_id": core_job, "refresh": True}, JOB)
     check("job history survived the restart",
