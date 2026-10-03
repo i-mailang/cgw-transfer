@@ -385,7 +385,9 @@ def main():
                              "-p", "MainPID", "--value"],
                             capture_output=True, text=True).stdout.strip()
     check("extension can use its private sandbox",
-          probe_out.get("sandbox_read") == "hello", str(probe_out)[:200])
+          probe_out.get("sandbox_read") == "hello",
+          "output=%s error=%s" % (str(probe_out)[:160],
+                                  str((r.get("result") or {}).get("error"))[:240]))
     check("worker reports exactly the capabilities it was granted",
           probe_out.get("caps_granted") == [], str(probe_out.get("caps_granted")))
 
@@ -495,10 +497,19 @@ def main():
           "found %d" % n_worker)
 
     section("16. Clean up the probe extensions")
+    # These probes were never activated, so disable correctly refuses with 409
+    # ("nothing to disable"). Cleanup tolerates that: what matters is that no
+    # probe extension is left active.
     for nm in ("cap_undeclared_probe", "cap_unknown_probe",
-               "proc_isolation_probe"):
+               "proc_isolation_probe", "import_os_probe", "sync_probe"):
         st, r = m("disable_gateway_extension", {"name": nm})
-        check("%s disabled" % nm, st in (200, 404), "got %s" % st)
+        check("%s is not left active" % nm, st in (200, 404, 409),
+              "got %s" % st)
+    st, r = call("tools", None, MAINT, method="GET")
+    leftovers = [t["name"] for t in r["result"]["tools"]
+                 if t.get("plane") == "extension"]
+    check("no probe extension is left in the registry", leftovers == [],
+          str(leftovers))
 
     # ----------------------------------------------------------------------
     section("SUMMARY")
