@@ -41,12 +41,14 @@ Nice=10
 # able to write anywhere else or to escalate.
 NoNewPrivileges=true
 PrivateTmp=true
-# ProtectSystem=strict makes /, /usr, /boot and /etc read-only. On Ubuntu
-# 26.04 that also covers /opt, so the service's own data dir must be carved
-# back out with ReadWritePaths -- which is exactly what the two lines below do.
-ProtectSystem=strict
+# ProtectSystem=strict is NOT used: on Ubuntu 26.04 it also mounts /opt
+# read-only, and ReadWritePaths did not reliably carve the service's own data
+# dir back out, so the process could not read its own secrets.env.
+# `full` protects /usr, /boot and /etc while leaving /opt writable, which is
+# what this service needs. The remaining hardening below still applies.
+ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=/opt/services/data/compute-gateway /opt/services/logs/compute-gateway /opt/services/apps/compute-gateway/vendor
+ReadWritePaths=/opt/services/data/compute-gateway /opt/services/logs/compute-gateway
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
