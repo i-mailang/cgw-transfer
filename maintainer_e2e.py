@@ -201,14 +201,23 @@ def main():
     check("revision is the active one", _ar.get("active_revision") == rev1,
           str(_ar)[:200])
 
-    st, r = call("tools", None, JOB, method="GET")
+    st, r = call("tools", None, MAINT, method="GET")
     names = [t["name"] for t in r["result"]["tools"]]
-    check("extension is published in the live tool registry",
+    check("extension is published in the maintainer tool registry",
           EXT_NAME in names, "not in %d tools" % len(names))
     ext_tools = [t for t in r["result"]["tools"] if t["name"] == EXT_NAME]
     check("published tool is marked as an extension",
           ext_tools and ext_tools[0].get("plane") == "extension",
           str(ext_tools[:1]))
+    check("the extension tool carries its revision and source hash",
+          ext_tools and ext_tools[0].get("revision_id")
+          and ext_tools[0].get("source_hash"),
+          str(ext_tools[:1]))
+    st, r = call("tools", None, JOB, method="GET")
+    job_names = [t["name"] for t in r["result"]["tools"]]
+    check("the extension is NOT listed to the job plane (maintainer-only "
+          "inventory)",
+          EXT_NAME not in job_names, "leaked into the job-plane listing")
 
     section("5. INVOKED - through the normal tool registry")
     st, r = call(EXT_NAME, {"include_gpu": False, "gateway_revision": "0.2.0"}, JOB)
@@ -302,7 +311,7 @@ def main():
     section("10. DISABLED removes it from the active registry")
     st, r = m("disable_gateway_extension", {"name": EXT_NAME})
     check("disable returns 200", st == 200, str(r)[:300])
-    st, r = call("tools", None, JOB, method="GET")
+    st, r = call("tools", None, MAINT, method="GET")
     names = [t["name"] for t in r["result"]["tools"]]
     check("disabled extension is gone from the registry",
           EXT_NAME not in names, "still present")
@@ -315,14 +324,14 @@ def main():
                                     "def handle(p, caps):\n    return {}\n",
                                     caps=[], name="submit_job")})
     check("cannot take an operational tool name",
-          st == 400 and r["error"]["code"] == "NAME_COLLIDES_WITH_CORE_TOOL",
+          st == 409 and r["error"]["code"] == "NAME_COLLIDES_WITH_CORE_TOOL",
           "got %s %s" % (st, r.get("error", {}).get("code")))
     st, r = m("upsert_gateway_extension",
               {"manifest": manifest("1.0.0",
                                     "def handle(p, caps):\n    return {}\n",
                                     caps=[], name="activate_gateway_extension")})
     check("cannot take a maintainer tool name",
-          st == 400 and r["error"]["code"] == "NAME_COLLIDES_WITH_CORE_TOOL",
+          st == 409 and r["error"]["code"] == "NAME_COLLIDES_WITH_CORE_TOOL",
           "got %s" % st)
     st, r = call("submit_job", {"command": "echo CORE_INTACT",
                                 "timeout_s": 60}, JOB)
@@ -366,7 +375,7 @@ def main():
     m("validate_gateway_extension", {"revision_id": probe_rev})
     st, r = m("test_gateway_extension", {"revision_id": probe_rev,
                                          "test_payload": {}})
-    probe_out = (r["result"] or {}).get("output") or {}
+    probe_out = ((r.get("result") or {}).get("result") or {}).get("output") or {}
     gw_pid = subprocess.run(["systemctl", "show", "compute-gateway.service",
                              "-p", "MainPID", "--value"],
                             capture_output=True, text=True).stdout.strip()
@@ -425,7 +434,7 @@ def main():
           str(len(revs)))
 
     # DISABLED must reconstruct as DISABLED, not silently reactivate.
-    st, r = call("tools", None, JOB, method="GET")
+    st, r = call("tools", None, MAINT, method="GET")
     names = [t["name"] for t in r["result"]["tools"]]
     check("DISABLED extension does not come back active after restart",
           EXT_NAME not in names, "unexpectedly present")
@@ -435,13 +444,13 @@ def main():
     check("v1 can be re-activated after being disabled",
           st == 200 and (r.get("result") or {}).get("active_revision") == rev1,
           str(r)[:200])
-    st, r = call("tools", None, JOB, method="GET")
+    st, r = call("tools", None, MAINT, method="GET")
     names = [t["name"] for t in r["result"]["tools"]]
     check("re-activated extension is back in the registry", EXT_NAME in names)
 
     subprocess.run(["systemctl", "restart", "compute-gateway.service"], check=True)
     time.sleep(6)
-    st, r = call("tools", None, JOB, method="GET")
+    st, r = call("tools", None, MAINT, method="GET")
     names = [t["name"] for t in r["result"]["tools"]]
     check("ACTIVE state reconstructs correctly after restart", EXT_NAME in names,
           "missing from registry")
